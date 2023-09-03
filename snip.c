@@ -1,6 +1,9 @@
 // Boyaroslav 2023
 
 //thanks to https://stackoverflow.com/questions/8249669/how-do-take-a-screenshot-correctly-with-xlib
+
+#define TGAP 10
+
 #include<stdio.h>
 #include<stdlib.h>
 #include<X11/Xlib.h>
@@ -117,7 +120,7 @@ int main(int argc, char **argv)
     ry += rh;
     rh = 0 - rh;
   }
-  printf("%dx%d+%d+%d\n",rw,rh,rx,ry);
+  usleep(TGAP);
   XImage *image = XGetImage(disp,root, rx,ry , rw,rh,AllPlanes, ZPixmap);
      unsigned long red_mask = image->red_mask;
    unsigned long green_mask = image->green_mask;
@@ -128,6 +131,9 @@ int main(int argc, char **argv)
   png_structp png_ptr;
   png_infop png_info_ptr;
   png_bytep png_row;
+
+  if (rh == 0 || rw == 0){return -1;}
+
   if(argc < 2){
   fp = fopen("snip.png", "wb");
   }
@@ -191,6 +197,7 @@ int main(int argc, char **argv)
 
 
   XCloseDisplay(disp);
+  printf("%dx%d+%d+%d\n",rw,rh,rx,ry);
 
 
   return EXIT_SUCCESS;
