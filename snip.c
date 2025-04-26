@@ -3,16 +3,41 @@
 //thanks to https://stackoverflow.com/questions/8249669/how-do-take-a-screenshot-correctly-with-xlib
 
 #define TGAP 10
-
+#include <X11/Xutil.h>
 #include<stdio.h>
 #include<stdlib.h>
 #include<X11/Xlib.h>
 #include<X11/cursorfont.h>
 #include<unistd.h>
+
+#include <GL/gl.h>
+#include <GL/glx.h>
+#include <GL/glxext.h>
+#include <X11/Xatom.h>
+#include <X11/extensions/Xrender.h>
+#include <X11/extensions/shape.h>
+#include <X11/extensions/Xcomposite.h>
 #include<png.h>
+
+static int wiwidth;
+static int wiheight;
+
 
 int main(int argc, char **argv)
 {
+
+
+  static int VisData[] = {
+    GLX_RENDER_TYPE, GLX_RGBA_BIT,
+    GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
+    GLX_DOUBLEBUFFER, True,
+    GLX_RED_SIZE, 8,
+    GLX_GREEN_SIZE, 8,
+    GLX_BLUE_SIZE, 8,
+    GLX_ALPHA_SIZE, 8,
+    GLX_DEPTH_SIZE, 16,
+    None
+    };
   int rx = 0, ry = 0, rw = 0, rh = 0;
   int rect_x = 0, rect_y = 0, rect_w = 0, rect_h = 0;
   int btn_pressed = 0, done = 0;
@@ -26,24 +51,86 @@ int main(int argc, char **argv)
   Screen *scr = NULL;
   scr = ScreenOfDisplay(disp, DefaultScreen(disp));
 
-  Window root = 0;
+  Window root = 0, window;
+
   root = RootWindow(disp, XScreenNumberOfScreen(scr));
 
   Cursor cursor, cursor2;
   cursor = XCreateFontCursor(disp, XC_left_ptr);
   cursor2 = XCreateFontCursor(disp, XC_lr_angle);
 
+  static XVisualInfo *visual;
+  static XRenderPictFormat *pict_format;
+
   XGCValues gcval;
+  static GLXFBConfig *fbconfigs, fbconfig;
+  XSetWindowAttributes attr;
   gcval.foreground = XWhitePixel(disp, 0);
   gcval.function = GXxor;
   gcval.background = XBlackPixel(disp, 0);
   gcval.plane_mask = gcval.background ^ gcval.foreground;
   gcval.subwindow_mode = IncludeInferiors;
+  int numfbconfigs;
+
+  fbconfigs = glXChooseFBConfig(disp, DefaultScreen(disp), VisData, &numfbconfigs);
+  fbconfig = 0;
+  for(int i = 0; i<numfbconfigs; i++) {
+    visual = (XVisualInfo*) glXGetVisualFromFBConfig(disp, fbconfigs[i]);
+    if(!visual)
+        continue;
+
+    pict_format = XRenderFindVisualFormat(disp, visual->visual);
+    if(!pict_format)
+        continue;
+
+    fbconfig = fbconfigs[i];
+    if(pict_format->direct.alphaMask > 0) {
+        break;
+    }
+    }
+
+  static Colormap cmap;
+
+
+  cmap = XCreateColormap(disp, root, visual->visual, AllocNone);
+
+  attr.override_redirect = True;
+  attr.colormap = cmap;
+  attr.background_pixmap = None;
+  attr.border_pixel = 0;
+
+  int attr_mask =
+      CWBackPixmap|
+      CWColormap|
+      CWBorderPixel|
+      CWEventMask;
+
+  
+  wiwidth = DisplayWidth(disp, DefaultScreen(disp));
+  wiheight = DisplayHeight(disp, DefaultScreen(disp));
+
+  window = XCreateWindow(disp, root, 0, 0, wiwidth, wiheight, 0,
+    visual->depth, InputOutput,
+    visual->visual,
+    CWOverrideRedirect | CWColormap | CWBackPixmap | CWBorderPixel, &attr);
+
+
+    Atom op_at = XInternAtom(disp, "_NET_WM_WINDOW_OPACITY", False);
+    unsigned long op_val = 0x7FFFFFFF;
+    XChangeProperty(disp, window, op_at, XA_CARDINAL, 32,
+                   PropModeReplace, (unsigned char *)&op_val, 1);
+
 
   GC gc;
-  gc = XCreateGC(disp, root,
+  gc = XCreateGC(disp, window,
                  GCFunction | GCForeground | GCBackground | GCSubwindowMode,
                  &gcval);
+
+    XserverRegion region = XFixesCreateRegion(disp, NULL, 0);
+    XFixesSetWindowShapeRegion(disp, window, ShapeBounding, 0, 0, 0);
+    XFixesSetWindowShapeRegion(disp, window, ShapeInput, 0, 0, region);
+    XFixesDestroyRegion(disp, region);
+    
 
   /* this XGrab* stuff makes XPending true ? */
   if ((XGrabPointer
@@ -57,6 +144,9 @@ int main(int argc, char **argv)
         CurrentTime) != GrabSuccess))
     printf("couldn't grab keyboard:");
 
+  XMapWindow(disp, window);
+  XRaiseWindow(disp, window);
+
   while (!done) {
     //~ while (!done && XPending(disp)) {
       //~ XNextEvent(disp, &ev);
@@ -68,7 +158,7 @@ int main(int argc, char **argv)
           if (btn_pressed) {
             if (rect_w) {
               /* re-draw the last rect to clear it */
-              XDrawRectangle(disp, root, gc, rect_x, rect_y, rect_w, rect_h);
+              XDrawRectangle(disp, window, gc, rect_x, rect_y, rect_w, rect_h);
             } else {
               /* Change the cursor to show we're selecting a region */
               XChangeActivePointerGrab(disp,
@@ -89,7 +179,7 @@ int main(int argc, char **argv)
               rect_h = 0 - rect_h;
             }
             /* draw rectangle */
-            XDrawRectangle(disp, root, gc, rect_x, rect_y, rect_w, rect_h);
+            XDrawRectangle(disp, window, gc, rect_x, rect_y, rect_w, rect_h);
             XFlush(disp);
           }
           break;
@@ -106,7 +196,7 @@ int main(int argc, char **argv)
   }
   /* clear the drawn rectangle */
   if (rect_w) {
-    XDrawRectangle(disp, root, gc, rect_x, rect_y, rect_w, rect_h);
+    XDrawRectangle(disp, window, gc, rect_x, rect_y, rect_w, rect_h);
     XFlush(disp);
   }
   rw = ev.xbutton.x - rx;

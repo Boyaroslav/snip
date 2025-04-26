@@ -1,3 +1,3 @@
 install:
-	gcc -o snip snip.c -lX11 -lpng
+	gcc -o snip snip.c -lX11 -lpng -lGL -lXext -lXrender -lm -lXfixes
 
